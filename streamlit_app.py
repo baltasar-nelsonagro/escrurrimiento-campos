@@ -135,6 +135,8 @@ def procesar_kml(ruta, buffer_km, progreso=None):
                 progreso(i / (n + 1), f"[{i}/{n}] Procesando {nombre} …")
             try:
                 r = motor.procesar_campo(c["poly"], nombre, salida_dir, args, tmp)
+                if not isinstance(r, dict):
+                    raise RuntimeError("el motor no devolvió el resultado (actualizá analisis_escurrimiento.py)")
                 resultados.append(r)
             except Exception as e:
                 traceback.print_exc()
@@ -144,9 +146,12 @@ def procesar_kml(ruta, buffer_km, progreso=None):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for r in resultados:
+            if not isinstance(r, dict):
+                continue
             for k in ("png", "kmz", "pdf"):
-                if os.path.exists(r[k]):
-                    z.write(r[k], os.path.basename(r[k]))
+                p = r.get(k)
+                if p and os.path.exists(p):
+                    z.write(p, os.path.basename(p))
     buf.seek(0)
     return resultados, fallidos, buf.getvalue()
 
@@ -192,6 +197,8 @@ def main():
                 resultados, fallidos, zip_bytes = procesar_kml(tmpf.name, buffer_km, prog)
         except Exception as e:
             st.error(f"No se pudo procesar el archivo: {e}")
+            with st.expander("Ver detalle técnico del error"):
+                st.code(traceback.format_exc())
             _foot(); return
         finally:
             try:
@@ -212,17 +219,18 @@ def main():
 
         filas = []
         for r in resultados:
-            d = r["datos"]
-            sal = d["salidas"][0] if d["salidas"] else None
-            filas.append({"Campo": r["nombre"], "Sup. (ha)": d["ha_campo"],
-                          "Desnivel (m)": d["desnivel"], "Anegable (ha)": d["ha_anegable"],
+            d = r.get("datos", {})
+            sal = d.get("salidas", [None])[0] if d.get("salidas") else None
+            filas.append({"Campo": r.get("nombre", "—"), "Sup. (ha)": d.get("ha_campo"),
+                          "Desnivel (m)": d.get("desnivel"), "Anegable (ha)": d.get("ha_anegable"),
                           "Salida principal": f"{sal['rumbo']} (~{sal['acc_ha']} ha)" if sal else "—"})
         st.table(filas)
         if fallidos:
             st.warning("No salieron: " + ", ".join(f"{n_} ({e})" for n_, e in fallidos))
 
         for r in resultados:
-            st.image(r["png"], caption=r["nombre"], use_column_width=True)
+            if r.get("png"):
+                st.image(r["png"], caption=r.get("nombre", ""), use_column_width=True)
 
         st.caption("Mapa de elevación: Copernicus GLO-30 (30 m). El patrón general del agua es "
                    "confiable; las líneas finas internas son orientativas. Para decisiones de obra "

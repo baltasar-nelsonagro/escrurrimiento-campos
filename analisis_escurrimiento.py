@@ -383,10 +383,16 @@ def generar_mapa(acc, dem, field, bounds, nombre, datos, png_path, campo=None):
                     fontsize=8.5, fontweight="bold", color="#b00", ha="center",
                     xytext=(s["lon"], s["lat"]),
                     bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="#b00", alpha=0.9), zorder=7)
-    ax.set_xlim(bounds[0], bounds[2]); ax.set_ylim(bounds[1], bounds[3])
-    ax.set_title(f"Escurrimiento del agua — {nombre}\n"
-                 f"{datos['ha_campo']} ha · Copernicus GLO-30 (30 m) · acumulación de flujo D8",
-                 fontsize=12, fontweight="bold", pad=10)
+    # Encuadrar SIEMPRE en el campo (con un margen), no en el DEM:
+    # así el campo queda centrado aunque el DEM sea más grande o esté corrido.
+    if campo is not None:
+        fx0, fy0, fx1, fy1 = campo.bounds
+        pad = max(0.18 * (fx1 - fx0), 0.18 * (fy1 - fy0))
+        ax.set_xlim(max(bounds[0], fx0 - pad), min(bounds[2], fx1 + pad))
+        ax.set_ylim(max(bounds[1], fy0 - pad), min(bounds[3], fy1 + pad))
+    else:
+        ax.set_xlim(bounds[0], bounds[2]); ax.set_ylim(bounds[1], bounds[3])
+    ax.set_title(f"Escurrimiento del agua — {nombre}", fontsize=12, fontweight="bold", pad=8)
     ax.set_xlabel("Longitud", fontsize=9); ax.set_ylabel("Latitud", fontsize=9)
     ax.tick_params(labelsize=8)
     leg = [Line2D([0], [0], color="#07306f", lw=5, label="Cauce principal (sale el agua)"),
@@ -446,57 +452,128 @@ def generar_kmz(acc, dem, field, bounds, campo, nombre, kmz_path):
     os.remove(kml_path); os.remove(png)
 
 
+# --- Paleta del informe ---
+_PRIM = (15, 42, 74)      # azul petróleo oscuro
+_ACC = (21, 101, 216)     # azul
+_LIGHT = (244, 247, 251)  # fondo tarjetas
+_BORD = (214, 224, 238)
+_GREEN = (22, 107, 74)
+_BROWN = (158, 110, 70)
+_MUT = (130, 138, 150)
+_TXT = (38, 42, 48)
+_WBG = (255, 248, 234)
+_WBD = (239, 211, 150)
+_WTX = (120, 86, 10)
+
+
+def _L(s):
+    """Texto seguro para fuentes core (latin-1)."""
+    for a, b in (("→", "->"), ("—", "-"), ("–", "-"), ("•", "-"),
+                 ("≈", "~"), ("✓", ""), ("’", "'"), ("“", '"'), ("”", '"')):
+        s = s.replace(a, b)
+    return s.encode("latin-1", "replace").decode("latin-1")
+
+
+def _rrect(pdf, x, y, w, h, r, style):
+    try:
+        pdf.rounded_rect(x, y, w, h, r, style=style)
+    except Exception:
+        pdf.rect(x, y, w, h, style)
+
+
 def generar_pdf(png_path, nombre, datos, pdf_path):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_pdf import PdfPages
-    import matplotlib.image as mpimg
-    diag, reco = narrar(nombre, datos)
-    with PdfPages(pdf_path) as pdf:
-        # Página 1: mapa
-        fig = plt.figure(figsize=(8.27, 11.69))  # A4
-        fig.suptitle(f"Escurrimiento del agua — {nombre}", fontsize=15,
-                     fontweight="bold", color="#07306f", y=0.975)
-        ax = fig.add_axes([0.05, 0.30, 0.90, 0.63]); ax.axis("off")
-        ax.imshow(mpimg.imread(png_path))
-        # cuadro de números
-        resumen = (f"Superficie: {datos['ha_campo']} ha      "
-                   f"Desnivel: {datos['desnivel']} m ({datos['elev_min']}–{datos['elev_max']} m)\n"
-                   f"Zonas anegables: ~{datos['ha_anegable']} ha      "
-                   f"Lomas altas: ~{datos['ha_alto']} ha")
-        fig.text(0.5, 0.25, resumen, ha="center", fontsize=10.5, color="#1a1a1a",
-                 bbox=dict(boxstyle="round,pad=0.6", fc="#f4f7fc", ec="#d8e2f0"))
-        fig.text(0.05, 0.04,
-                 "Fuente: Copernicus GLO-30 (ESA/Airbus, 30 m). Método: dirección de flujo D8 + "
-                 "acumulación (pysheds). Contorno provisto por el usuario.",
-                 fontsize=7, color="#888")
-        pdf.savefig(fig); plt.close(fig)
-        # Página 2: texto
-        fig = plt.figure(figsize=(8.27, 11.69)); fig.clf()
-        y = 0.93
-        fig.text(0.08, y, "Diagnóstico", fontsize=13, fontweight="bold", color="#07306f")
-        y -= 0.045
-        for d in diag:
-            y = _parrafo(fig, "•  " + d, y)
-        y -= 0.03
-        fig.text(0.08, y, "Recomendaciones de manejo", fontsize=13, fontweight="bold", color="#07306f")
-        y -= 0.045
-        for r in reco:
-            y = _parrafo(fig, "•  " + r, y)
-        y -= 0.03
-        _parrafo(fig, "Límite: resolución 30 m — el patrón general es sólido; las líneas finas "
-                      "internas son orientativas. Para decisiones de obra conviene rehacerlo con un "
-                      "DEM de 5 m (IGN MDE-Ar) usando la opción --dem.", y, color="#6a4e00")
-        pdf.savefig(fig); plt.close(fig)
-
-
-def _parrafo(fig, texto, y, color="#1a1a1a", ancho=92):
+    try:
+        from fpdf import FPDF
+    except ImportError:
+        import subprocess
+        print("   · Instalando librería de PDF (fpdf2) por única vez ...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "fpdf2"], check=False)
+        from fpdf import FPDF
+    from PIL import Image
     import textwrap
-    for linea in textwrap.wrap(texto, ancho):
-        fig.text(0.08, y, linea, fontsize=10, color=color)
-        y -= 0.028
-    return y - 0.012
+    diag, reco = narrar(nombre, datos)
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(False)
+
+    # ===================== PÁGINA 1 — MAPA =====================
+    pdf.add_page()
+    pdf.set_fill_color(*_PRIM); pdf.rect(0, 0, 210, 27, "F")
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_xy(14, 6); pdf.set_font("Helvetica", "B", 19)
+    pdf.cell(182, 9, _L("Análisis de Escurrimiento del Agua"), 0, 1)
+    pdf.set_xy(14, 16); pdf.set_font("Helvetica", "", 10.5)
+    pdf.cell(182, 6, _L(f"{nombre}   ·   {datos['ha_campo']} ha   ·   "
+                        f"Modelo de elevación Copernicus GLO-30 (30 m)"), 0, 1)
+
+    # mapa (ajustado al ancho, dejando lugar para las tarjetas)
+    iw, ih = Image.open(png_path).size
+    w = 186; h = w * ih / iw
+    if h > 206:
+        h = 206; w = h * iw / ih
+    x = (210 - w) / 2
+    pdf.image(png_path, x=x, y=31, w=w, h=h)
+
+    # tarjetas de datos
+    cy = 31 + h + 6
+    if cy > 268:
+        cy = 268
+    tarjetas = [("Superficie", f"{datos['ha_campo']} ha", _ACC),
+                ("Desnivel total", f"{datos['desnivel']} m", _ACC),
+                ("Zonas anegables", f"{datos['ha_anegable']} ha", _GREEN),
+                ("Lomas altas", f"{datos['ha_alto']} ha", _BROWN)]
+    gap = 4; cw = (186 - 3 * gap) / 4; cx = 12
+    for lab, val, col in tarjetas:
+        pdf.set_fill_color(*_LIGHT); pdf.set_draw_color(*_BORD)
+        _rrect(pdf, cx, cy, cw, 22, 2.5, "DF")
+        pdf.set_text_color(*col); pdf.set_font("Helvetica", "B", 15)
+        pdf.set_xy(cx, cy + 4.5); pdf.cell(cw, 7, _L(val), 0, 0, "C")
+        pdf.set_text_color(*_MUT); pdf.set_font("Helvetica", "", 8)
+        pdf.set_xy(cx, cy + 13); pdf.multi_cell(cw, 4, _L(lab), 0, "C")
+        cx += cw + gap
+
+    # ===================== PÁGINA 2 — ANÁLISIS =====================
+    pdf.add_page()
+    pdf.set_fill_color(*_PRIM); pdf.rect(0, 0, 210, 15, "F")
+    pdf.set_text_color(255, 255, 255); pdf.set_xy(14, 4); pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(182, 7, _L(f"{nombre}  -  Diagnóstico y recomendaciones"), 0, 1)
+
+    y = 24
+    y = _seccion(pdf, "Diagnóstico", diag, y, _ACC)
+    y += 5
+    y = _seccion(pdf, "Recomendaciones de manejo", reco, y, _GREEN)
+    y += 5
+
+    # caja de límites
+    txt = _L("Límite del estudio: resolución 30 m. El patrón general del agua (hacia dónde "
+             "escurre, dónde se junta) es confiable; las líneas finas dentro del lote son "
+             "orientativas. Para decisiones de obra conviene rehacerlo con un DEM de 5 m (IGN MDE-Ar).")
+    lineas = textwrap.wrap(txt, 96)
+    bh = len(lineas) * 4.6 + 7
+    pdf.set_fill_color(*_WBG); pdf.set_draw_color(*_WBD)
+    _rrect(pdf, 12, y, 186, bh, 2.5, "DF")
+    pdf.set_text_color(*_WTX); pdf.set_font("Helvetica", "", 9)
+    pdf.set_xy(16, y + 3.5); pdf.multi_cell(178, 4.6, txt, 0, "L")
+
+    # pie
+    pdf.set_y(-15); pdf.set_text_color(*_MUT); pdf.set_font("Helvetica", "", 7.5)
+    pdf.multi_cell(0, 4, _L("Fuente de elevación: Copernicus GLO-30 (ESA/Airbus), repositorio abierto "
+                            "de AWS. Método: dirección de flujo D8 + acumulación de flujo (pysheds). "
+                            "Contorno del campo provisto por el usuario."), 0, "L")
+    pdf.output(pdf_path)
+
+
+def _seccion(pdf, titulo, items, y, color):
+    pdf.set_fill_color(*color); _rrect(pdf, 12, y, 186, 8.5, 1.5, "F")
+    pdf.set_text_color(255, 255, 255); pdf.set_font("Helvetica", "B", 11)
+    pdf.set_xy(16, y + 1.4); pdf.cell(178, 6, _L(titulo), 0, 1)
+    y += 12
+    pdf.set_text_color(*_TXT); pdf.set_font("Helvetica", "", 10)
+    for it in items:
+        pdf.set_fill_color(*color); pdf.rect(14, y + 1.6, 2, 2, "F")
+        pdf.set_xy(19, y); pdf.multi_cell(179, 5, _L(it), 0, "L")
+        y = pdf.get_y() + 3
+    return y
 
 
 # ----------------------------------------------------------------------------
@@ -578,18 +655,25 @@ def procesar_campo(campo, nombre, carpeta, args, tmp):
     print(f"   ✔ {nombre}: ~{datos['ha_campo']} ha | desnivel {datos['desnivel']} m | "
           f"anegable ~{datos['ha_anegable']} ha | "
           + (", ".join(f"salida {s['rumbo']} ~{s['acc_ha']}ha" for s in datos['salidas']) or "sin cauces marcados"))
+    return {"nombre": nombre, "datos": datos, "png": png, "kmz": kmz, "pdf": pdf}
 
 
 def recortar_dem_propio(dem_path, bbox, tmp):
     import rasterio
     from rasterio.windows import from_bounds as win_from_bounds
+    W, S, E, N = bbox
     with rasterio.open(dem_path) as ds:
-        try:
-            win = win_from_bounds(*bbox, transform=ds.transform)
+        b = ds.bounds
+        # Intersecar el recuadro pedido con lo que el DEM realmente cubre,
+        # así nunca se pide fuera de rango (evita recortes erróneos).
+        W2, S2 = max(W, b.left), max(S, b.bottom)
+        E2, N2 = min(E, b.right), min(N, b.top)
+        if E2 <= W2 or N2 <= S2:
+            data = ds.read(1); transform = ds.transform
+        else:
+            win = win_from_bounds(W2, S2, E2, N2, transform=ds.transform)
             data = ds.read(1, window=win)
             transform = ds.window_transform(win)
-        except Exception:
-            data = ds.read(1); transform = ds.transform
         meta = ds.meta.copy()
         meta.update({"height": data.shape[0], "width": data.shape[1],
                      "transform": transform, "count": 1})
