@@ -114,8 +114,8 @@ def pasos():
         <p>En Google Earth, marcá el contorno con la herramienta de polígono y exportalo como KML.</p></div>
       <div class="step"><div class="n">2</div><h4>Subí el archivo</h4>
         <p>Cargá el KML/KMZ acá. Podés poner varios campos en el mismo archivo.</p></div>
-      <div class="step"><div class="n">3</div><h4>Descargá el análisis</h4>
-        <p>Obtené el mapa, el KMZ para Google Earth y un informe PDF con recomendaciones.</p></div>
+      <div class="step"><div class="n">3</div><h4>Descargá el informe</h4>
+        <p>Obtené un informe PDF con el mapa del agua y las recomendaciones de manejo.</p></div>
     </div>""", unsafe_allow_html=True)
 
 
@@ -142,18 +142,8 @@ def procesar_kml(ruta, buffer_km, progreso=None):
                 traceback.print_exc()
                 fallidos.append((nombre, str(e)))
     if progreso:
-        progreso(1.0, "Armando la descarga…")
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for r in resultados:
-            if not isinstance(r, dict):
-                continue
-            for k in ("png", "kmz", "pdf"):
-                p = r.get(k)
-                if p and os.path.exists(p):
-                    z.write(p, os.path.basename(p))
-    buf.seek(0)
-    return resultados, fallidos, buf.getvalue()
+        progreso(1.0, "Preparando el informe…")
+    return resultados, fallidos
 
 
 # ----------------------------------------------------------------------------
@@ -176,8 +166,7 @@ def main():
             st.markdown(
                 '<div class="placeholder">👈 Cargá un archivo y apretá '
                 '<b>Analizar escurrimiento</b>.<br><br>Por cada campo vas a obtener un '
-                '<b>mapa</b> del agua, un <b>KMZ</b> para ver sobre el satélite en Google Earth, '
-                'y un <b>informe PDF</b> con diagnóstico y recomendaciones '
+                '<b>informe PDF</b> con el mapa del agua y el diagnóstico '
                 '(dónde conviene una represa, dónde el casco, qué zonas se anegan).</div>',
                 unsafe_allow_html=True)
 
@@ -194,7 +183,7 @@ def main():
             barra.progress(min(max(frac, 0.0), 1.0), text=txt)
         try:
             with st.spinner("Procesando (baja el mapa de elevación y calcula)…"):
-                resultados, fallidos, zip_bytes = procesar_kml(tmpf.name, buffer_km, prog)
+                resultados, fallidos = procesar_kml(tmpf.name, buffer_km, prog)
         except Exception as e:
             st.error(f"No se pudo procesar el archivo: {e}")
             with st.expander("Ver detalle técnico del error"):
@@ -213,28 +202,29 @@ def main():
             _foot(); return
 
         st.success(f"Listo: {len(resultados)} de {len(resultados) + len(fallidos)} campos procesados.")
-        st.download_button("⬇️  Descargar todo (ZIP: mapas + KMZ + PDF)",
-                           data=zip_bytes, file_name="Resultados_Escurrimiento.zip",
-                           mime="application/zip", use_container_width=True)
 
-        filas = []
-        for r in resultados:
-            d = r.get("datos", {})
-            sal = d.get("salidas", [None])[0] if d.get("salidas") else None
-            filas.append({"Campo": r.get("nombre", "—"), "Sup. (ha)": d.get("ha_campo"),
-                          "Desnivel (m)": d.get("desnivel"), "Anegable (ha)": d.get("ha_anegable"),
-                          "Salida principal": f"{sal['rumbo']} (~{sal['acc_ha']} ha)" if sal else "—"})
-        st.table(filas)
+        # Solo el informe PDF
+        pdfs = [(r.get("nombre", "Campo"), r.get("pdf")) for r in resultados
+                if r.get("pdf") and os.path.exists(r.get("pdf"))]
+        if len(pdfs) == 1:
+            nombre, ruta = pdfs[0]
+            with open(ruta, "rb") as fh:
+                st.download_button(f"⬇️  Descargar informe PDF — {nombre}",
+                                   data=fh.read(), file_name=os.path.basename(ruta),
+                                   mime="application/pdf", use_container_width=True)
+        elif len(pdfs) > 1:
+            # varios campos: un ZIP solo con los PDF
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                for nombre, ruta in pdfs:
+                    z.write(ruta, os.path.basename(ruta))
+            buf.seek(0)
+            st.download_button("⬇️  Descargar informes PDF (ZIP)",
+                               data=buf.getvalue(), file_name="Informes_Escurrimiento.zip",
+                               mime="application/zip", use_container_width=True)
+
         if fallidos:
             st.warning("No salieron: " + ", ".join(f"{n_} ({e})" for n_, e in fallidos))
-
-        for r in resultados:
-            if r.get("png"):
-                st.image(r["png"], caption=r.get("nombre", ""), use_column_width=True)
-
-        st.caption("Mapa de elevación: Copernicus GLO-30 (30 m). El patrón general del agua es "
-                   "confiable; las líneas finas internas son orientativas. Para decisiones de obra "
-                   "conviene un DEM de 5 m.")
     _foot()
 
 
