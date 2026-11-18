@@ -1,0 +1,10 @@
+streamlit
+numpy
+scipy
+rasterio
+shapely
+pysheds
+matplotlib
+pillow
+certifi
+fpdf2
