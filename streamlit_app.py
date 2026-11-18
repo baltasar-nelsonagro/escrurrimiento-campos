@@ -15,6 +15,7 @@ import streamlit as st
 
 import analisis_escurrimiento as motor
 import suelo as suelo_mod
+import ambientes as ambientes_mod
 
 st.set_page_config(page_title="Escurrimiento y Suelo · Nelson Agro",
                    page_icon="💧", layout="wide")
@@ -103,7 +104,8 @@ def hero():
       <span class="kicker">Nelson Agro · San Marcos</span>
       <h1>Análisis de Escurrimiento<br>y Suelo de Campos</h1>
       <p>Subí el contorno de tu campo y obtené un informe único: por dónde corre y se junta el agua,
-         y la calidad del suelo (textura, pH, materia orgánica), con recomendaciones de manejo. Sin instalar nada.</p>
+         la calidad del suelo (textura, pH, materia orgánica) y un mapa de ambientes (variación interna),
+         con recomendaciones de manejo. Sin instalar nada.</p>
       <div class="bar"></div>
     </div>""", unsafe_allow_html=True)
 
@@ -116,7 +118,7 @@ def pasos():
       <div class="step"><div class="n">2</div><h4>Subí el archivo</h4>
         <p>Cargá el KML/KMZ acá. Podés poner varios campos en el mismo archivo.</p></div>
       <div class="step"><div class="n">3</div><h4>Descargá el informe</h4>
-        <p>Un PDF unificado: escurrimiento del agua + calidad de suelo, con recomendaciones de manejo.</p></div>
+        <p>Un PDF unificado: escurrimiento del agua, calidad de suelo y mapa de ambientes, con recomendaciones.</p></div>
     </div>""", unsafe_allow_html=True)
 
 
@@ -136,11 +138,16 @@ def procesar_kml(ruta, buffer_km, incluir_suelo=False, progreso=None):
                 progreso(i / (n + 1), f"[{i}/{n}] Procesando {nombre} …")
             try:
                 s = None
+                amb = None
                 if incluir_suelo:
                     if progreso:
                         progreso(i / (n + 1), f"[{i}/{n}] {nombre}: consultando suelo …")
                     s = suelo_mod.analizar_suelo(c["poly"])
-                r = motor.procesar_campo(c["poly"], nombre, salida_dir, args, tmp, suelo=s)
+                    if progreso:
+                        progreso(i / (n + 1), f"[{i}/{n}] {nombre}: mapa de ambientes (satélite) …")
+                    a = ambientes_mod.analizar_ambientes(c["poly"], salida_dir)
+                    amb = a if a else "no_disponible"
+                r = motor.procesar_campo(c["poly"], nombre, salida_dir, args, tmp, suelo=s, ambientes=amb)
                 if not isinstance(r, dict):
                     raise RuntimeError("el motor no devolvió el resultado (actualizá analisis_escurrimiento.py)")
                 resultados.append(r)
@@ -166,7 +173,7 @@ def main():
                                    label_visibility="collapsed")
         buffer_km = st.slider("Margen alrededor del campo (km)", 1, 6, 3)
         correr = st.button("Analizar", type="primary", use_container_width=True)
-        st.caption("El informe incluye escurrimiento del agua y calidad de suelo.")
+        st.caption("El informe incluye escurrimiento del agua, calidad de suelo y mapa de ambientes.")
 
     with col_out:
         if not correr:
@@ -174,8 +181,9 @@ def main():
                 '<div class="placeholder">👈 Cargá un archivo y apretá '
                 '<b>Analizar</b>.<br><br>Por cada campo vas a obtener un '
                 '<b>informe PDF unificado</b>: el <b>mapa del agua</b> (dónde conviene una represa, '
-                'dónde el casco, qué zonas se anegan) y la <b>calidad de suelo</b> '
-                '(textura, pH, materia orgánica, CIC).</div>',
+                'dónde el casco, qué zonas se anegan), la <b>calidad de suelo</b> '
+                '(textura, pH, materia orgánica) y un <b>mapa de ambientes</b> que muestra la '
+                'variación interna del campo.</div>',
                 unsafe_allow_html=True)
 
     if correr:

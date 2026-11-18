@@ -8,3 +8,7 @@ matplotlib
 pillow
 certifi
 fpdf2
+pystac-client
+planetary-computer
+odc-stac
+rioxarray

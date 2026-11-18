@@ -481,7 +481,7 @@ def _rrect(pdf, x, y, w, h, r, style):
         pdf.rect(x, y, w, h, style)
 
 
-def generar_pdf(png_path, nombre, datos, pdf_path, suelo=None):
+def generar_pdf(png_path, nombre, datos, pdf_path, suelo=None, ambientes=None):
     try:
         from fpdf import FPDF
     except ImportError:
@@ -503,8 +503,15 @@ def generar_pdf(png_path, nombre, datos, pdf_path, suelo=None):
     pdf.set_xy(14, 6); pdf.set_font("Helvetica", "B", 19)
     pdf.cell(182, 9, _L(f"Informe — {nombre}"), 0, 1)
     pdf.set_xy(14, 16); pdf.set_font("Helvetica", "", 10.5)
-    _alcance = ("Análisis de escurrimiento del agua y calidad de suelo"
-                if suelo else "Análisis de escurrimiento del agua")
+    _partes = ["escurrimiento del agua"]
+    if suelo:
+        _partes.append("calidad de suelo")
+    if ambientes and ambientes != "no_disponible":
+        _partes.append("ambientes")
+    if len(_partes) == 1:
+        _alcance = "Análisis de " + _partes[0]
+    else:
+        _alcance = "Análisis de " + ", ".join(_partes[:-1]) + " y " + _partes[-1]
     pdf.cell(182, 6, _L(f"{_alcance}   ·   {datos['ha_campo']} ha"), 0, 1)
 
     # mapa (ajustado al ancho, dejando lugar para las tarjetas)
@@ -564,7 +571,82 @@ def generar_pdf(png_path, nombre, datos, pdf_path, suelo=None):
 
     if suelo:
         _pagina_suelo(pdf, nombre, suelo)
+    if ambientes is not None:
+        _pagina_ambientes(pdf, nombre, ambientes)
     pdf.output(pdf_path)
+
+
+def _pagina_ambientes(pdf, nombre, ambientes):
+    import textwrap
+    from PIL import Image
+    pdf.add_page()
+    pdf.set_fill_color(*_PRIM); pdf.rect(0, 0, 210, 15, "F")
+    pdf.set_text_color(255, 255, 255); pdf.set_xy(14, 4); pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(182, 7, _L(f"{nombre}  -  Ambientes (variación interna)"), 0, 1)
+
+    if ambientes == "no_disponible" or not isinstance(ambientes, dict):
+        y = 28
+        txt = _L("Mapa de ambientes satelital: NO DISPONIBLE para este campo. "
+                 "Puede deberse a falta de imágenes satelitales sin nubes, a un campo muy chico "
+                 "o a una zona sin cobertura útil. "
+                 "Como referencia de la variación interna del suelo, usá el MAPA DE ESCURRIMIENTO "
+                 "de la página 1: en terreno de monte, los bajos y las lomas del relieve son el "
+                 "mejor indicador disponible de dónde cambia la calidad del suelo.")
+        lineas = textwrap.wrap(txt, 96); bh = len(lineas) * 5 + 8
+        pdf.set_fill_color(*_WBG); pdf.set_draw_color(*_WBD)
+        _rrect(pdf, 12, y, 186, bh, 2.5, "DF")
+        pdf.set_text_color(*_WTX); pdf.set_font("Helvetica", "", 10)
+        pdf.set_xy(16, y + 4); pdf.multi_cell(178, 5, txt, 0, "L")
+        return
+
+    tipo = ambientes.get("tipo", "")
+    # mapa
+    png = ambientes.get("png")
+    if png and os.path.exists(png):
+        iw, ih = Image.open(png).size
+        w = 150; h = w * ih / iw
+        if h > 150:
+            h = 150; w = h * iw / ih
+        pdf.image(png, x=(210 - w) / 2, y=22, w=w, h=h)
+        y = 22 + h + 5
+    else:
+        y = 26
+
+    # stats por zona
+    pdf.set_fill_color(*_ACC); _rrect(pdf, 12, y, 186, 8.5, 1.5, "F")
+    pdf.set_text_color(255, 255, 255); pdf.set_font("Helvetica", "B", 11)
+    pdf.set_xy(16, y + 1.4); pdf.cell(178, 6, _L(f"Zonas del campo  ({tipo})"), 0, 1)
+    y += 12
+    pdf.set_text_color(*_TXT); pdf.set_font("Helvetica", "", 10)
+    for z in ambientes.get("zonas", []):
+        pdf.set_x(18); pdf.cell(110, 6, _L(z.get("zona", "")), 0, 0)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(60, 6, _L(f"{z.get('ha','?')} ha  ({z.get('pct','?')}%)"), 0, 1)
+        pdf.set_font("Helvetica", "", 10)
+        y += 6
+
+    # interpretación según tipo
+    y += 4
+    if "agr" in tipo:
+        interp = ("El vigor del cultivo marca la productividad del suelo: las zonas verdes (alto) "
+                  "rinden más y las rojas (bajo) menos. Útil para manejo por ambientes "
+                  "(siembra y fertilización variable).")
+    else:
+        interp = ("En monte, el vigor de la vegetación es un proxy del suelo y el agua: el monte denso "
+                  "(verde) suele indicar mejor suelo o más humedad; las zonas ralas/peladas (rojo) "
+                  "suelen marcar suelos pobres, arenosos o salinos/sódicos. Es una referencia indirecta.")
+    txt = _L(interp)
+    lineas = textwrap.wrap(txt, 98); bh = len(lineas) * 4.8 + 7
+    pdf.set_fill_color(*_LIGHT); pdf.set_draw_color(*_BORD)
+    _rrect(pdf, 12, y, 186, bh, 2.5, "DF")
+    pdf.set_text_color(*_TXT); pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_xy(16, y + 3.5); pdf.multi_cell(178, 4.8, txt, 0, "L")
+
+    # pie
+    pdf.set_y(-15); pdf.set_text_color(*_MUT); pdf.set_font("Helvetica", "", 7.5)
+    pdf.multi_cell(0, 4, _L(f"Fuente: Sentinel-2 (ESA) vía Microsoft Planetary Computer. "
+                            f"NDVI mediano de {ambientes.get('n_escenas','?')} imágenes sin nubes. "
+                            "Zonas por terciles de NDVI. Referencia, no reemplaza muestreo de suelo a campo."), 0, "L")
 
 
 def _pagina_suelo(pdf, nombre, suelo):
@@ -693,7 +775,7 @@ def main():
     print("============================================")
 
 
-def procesar_campo(campo, nombre, carpeta, args, tmp, suelo=None):
+def procesar_campo(campo, nombre, carpeta, args, tmp, suelo=None, ambientes=None):
     minx, miny, maxx, maxy = campo.bounds
     km = args.buffer
     dlat = km / 111.0
@@ -721,7 +803,7 @@ def procesar_campo(campo, nombre, carpeta, args, tmp, suelo=None):
     pdf = os.path.join(carpeta, f"Informe_{nombre}.pdf")
     generar_mapa(acc, dem, field, bounds, nombre, datos, png, campo=campo)
     generar_kmz(acc, dem, field, bounds, campo, nombre, kmz)
-    generar_pdf(png, nombre, datos, pdf, suelo=suelo)
+    generar_pdf(png, nombre, datos, pdf, suelo=suelo, ambientes=ambientes)
     print(f"   ✔ {nombre}: ~{datos['ha_campo']} ha | desnivel {datos['desnivel']} m | "
           f"anegable ~{datos['ha_anegable']} ha | "
           + (", ".join(f"salida {s['rumbo']} ~{s['acc_ha']}ha" for s in datos['salidas']) or "sin cauces marcados"))
