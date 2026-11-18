@@ -501,10 +501,11 @@ def generar_pdf(png_path, nombre, datos, pdf_path, suelo=None):
     pdf.set_fill_color(*_PRIM); pdf.rect(0, 0, 210, 27, "F")
     pdf.set_text_color(255, 255, 255)
     pdf.set_xy(14, 6); pdf.set_font("Helvetica", "B", 19)
-    pdf.cell(182, 9, _L("Análisis de Escurrimiento del Agua"), 0, 1)
+    pdf.cell(182, 9, _L(f"Informe — {nombre}"), 0, 1)
     pdf.set_xy(14, 16); pdf.set_font("Helvetica", "", 10.5)
-    pdf.cell(182, 6, _L(f"{nombre}   ·   {datos['ha_campo']} ha   ·   "
-                        f"Modelo de elevación Copernicus GLO-30 (30 m)"), 0, 1)
+    _alcance = ("Análisis de escurrimiento del agua y calidad de suelo"
+                if suelo else "Análisis de escurrimiento del agua")
+    pdf.cell(182, 6, _L(f"{_alcance}   ·   {datos['ha_campo']} ha"), 0, 1)
 
     # mapa (ajustado al ancho, dejando lugar para las tarjetas)
     iw, ih = Image.open(png_path).size
@@ -717,7 +718,7 @@ def procesar_campo(campo, nombre, carpeta, args, tmp, suelo=None):
     print("   Generando mapa, KMZ e informe PDF ...")
     png = os.path.join(carpeta, f"Escurrimiento_{nombre}.png")
     kmz = os.path.join(carpeta, f"Escurrimiento_{nombre}.kmz")
-    pdf = os.path.join(carpeta, f"Informe_Escurrimiento_{nombre}.pdf")
+    pdf = os.path.join(carpeta, f"Informe_{nombre}.pdf")
     generar_mapa(acc, dem, field, bounds, nombre, datos, png, campo=campo)
     generar_kmz(acc, dem, field, bounds, campo, nombre, kmz)
     generar_pdf(png, nombre, datos, pdf, suelo=suelo)

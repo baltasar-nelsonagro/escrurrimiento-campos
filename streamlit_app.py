@@ -16,7 +16,7 @@ import streamlit as st
 import analisis_escurrimiento as motor
 import suelo as suelo_mod
 
-st.set_page_config(page_title="Escurrimiento de Campos · Nelson Agro",
+st.set_page_config(page_title="Escurrimiento y Suelo · Nelson Agro",
                    page_icon="💧", layout="wide")
 
 BORDO = "#6B1F2A"
@@ -101,9 +101,9 @@ def hero():
     st.markdown(f"""
     <div class="hero">
       <span class="kicker">Nelson Agro · San Marcos</span>
-      <h1>Análisis de Escurrimiento<br>de Campos</h1>
-      <p>Subí el contorno de tu campo y obtené un mapa de por dónde corre y se junta el agua,
-         con recomendaciones de manejo. Sin instalar nada.</p>
+      <h1>Análisis de Escurrimiento<br>y Suelo de Campos</h1>
+      <p>Subí el contorno de tu campo y obtené un informe único: por dónde corre y se junta el agua,
+         y la calidad del suelo (textura, pH, materia orgánica), con recomendaciones de manejo. Sin instalar nada.</p>
       <div class="bar"></div>
     </div>""", unsafe_allow_html=True)
 
@@ -116,7 +116,7 @@ def pasos():
       <div class="step"><div class="n">2</div><h4>Subí el archivo</h4>
         <p>Cargá el KML/KMZ acá. Podés poner varios campos en el mismo archivo.</p></div>
       <div class="step"><div class="n">3</div><h4>Descargá el informe</h4>
-        <p>Obtené un informe PDF con el mapa del agua y las recomendaciones de manejo.</p></div>
+        <p>Un PDF unificado: escurrimiento del agua + calidad de suelo, con recomendaciones de manejo.</p></div>
     </div>""", unsafe_allow_html=True)
 
 
@@ -165,18 +165,17 @@ def main():
         archivo = st.file_uploader("Contorno del campo (KML o KMZ)", type=["kml", "kmz"],
                                    label_visibility="collapsed")
         buffer_km = st.slider("Margen alrededor del campo (km)", 1, 6, 3)
-        incluir_suelo = st.checkbox("Incluir análisis de suelo", value=True,
-                                    help="Agrega una página al PDF con textura, pH, materia orgánica "
-                                         "y CIC (fuente SoilGrids). Suma unos segundos.")
         correr = st.button("Analizar", type="primary", use_container_width=True)
+        st.caption("El informe incluye escurrimiento del agua y calidad de suelo.")
 
     with col_out:
         if not correr:
             st.markdown(
                 '<div class="placeholder">👈 Cargá un archivo y apretá '
-                '<b>Analizar escurrimiento</b>.<br><br>Por cada campo vas a obtener un '
-                '<b>informe PDF</b> con el mapa del agua y el diagnóstico '
-                '(dónde conviene una represa, dónde el casco, qué zonas se anegan).</div>',
+                '<b>Analizar</b>.<br><br>Por cada campo vas a obtener un '
+                '<b>informe PDF unificado</b>: el <b>mapa del agua</b> (dónde conviene una represa, '
+                'dónde el casco, qué zonas se anegan) y la <b>calidad de suelo</b> '
+                '(textura, pH, materia orgánica, CIC).</div>',
                 unsafe_allow_html=True)
 
     if correr:
@@ -192,7 +191,7 @@ def main():
             barra.progress(min(max(frac, 0.0), 1.0), text=txt)
         try:
             with st.spinner("Procesando (baja el mapa de elevación y calcula)…"):
-                resultados, fallidos = procesar_kml(tmpf.name, buffer_km, incluir_suelo, prog)
+                resultados, fallidos = procesar_kml(tmpf.name, buffer_km, True, prog)
         except Exception as e:
             st.error(f"No se pudo procesar el archivo: {e}")
             with st.expander("Ver detalle técnico del error"):
