@@ -481,7 +481,7 @@ def _rrect(pdf, x, y, w, h, r, style):
         pdf.rect(x, y, w, h, style)
 
 
-def generar_pdf(png_path, nombre, datos, pdf_path):
+def generar_pdf(png_path, nombre, datos, pdf_path, suelo=None):
     try:
         from fpdf import FPDF
     except ImportError:
@@ -560,7 +560,76 @@ def generar_pdf(png_path, nombre, datos, pdf_path):
     pdf.multi_cell(0, 4, _L("Fuente de elevación: Copernicus GLO-30 (ESA/Airbus), repositorio abierto "
                             "de AWS. Método: dirección de flujo D8 + acumulación de flujo (pysheds). "
                             "Contorno del campo provisto por el usuario."), 0, "L")
+
+    if suelo:
+        _pagina_suelo(pdf, nombre, suelo)
     pdf.output(pdf_path)
+
+
+def _pagina_suelo(pdf, nombre, suelo):
+    # ===================== PÁGINA 3 — SUELO =====================
+    pdf.add_page()
+    pdf.set_fill_color(*_PRIM); pdf.rect(0, 0, 210, 15, "F")
+    pdf.set_text_color(255, 255, 255); pdf.set_xy(14, 4); pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(182, 7, _L(f"{nombre}  -  Calidad de suelo"), 0, 1)
+
+    # tarjetas con los valores principales
+    cy = 24
+    def card(x, w, val, lab, col):
+        pdf.set_fill_color(*_LIGHT); pdf.set_draw_color(*_BORD)
+        _rrect(pdf, x, cy, w, 22, 2.5, "DF")
+        pdf.set_text_color(*col); pdf.set_font("Helvetica", "B", 14)
+        pdf.set_xy(x, cy + 4.5); pdf.cell(w, 7, _L(val), 0, 0, "C")
+        pdf.set_text_color(*_MUT); pdf.set_font("Helvetica", "", 8)
+        pdf.set_xy(x, cy + 13); pdf.multi_cell(w, 4, _L(lab), 0, "C")
+    gap = 4; cw = (186 - 3 * gap) / 4; x = 12
+    tex = suelo.get("textura") or "s/d"
+    ph = suelo.get("ph"); mo = suelo.get("mo"); cic = suelo.get("cic")
+    card(x, cw, tex if len(tex) <= 16 else tex[:15] + ".", "Clase textural", _ACC); x += cw + gap
+    card(x, cw, f"{ph}" if ph is not None else "s/d", "pH (agua)", _GREEN); x += cw + gap
+    card(x, cw, f"{mo}%" if mo is not None else "s/d", "Materia orgánica", _BROWN); x += cw + gap
+    card(x, cw, f"{cic}" if cic is not None else "s/d", "CIC (cmol/kg)", _ACC)
+
+    # composición textural
+    y = cy + 30
+    pdf.set_fill_color(*_ACC); _rrect(pdf, 12, y, 186, 8.5, 1.5, "F")
+    pdf.set_text_color(255, 255, 255); pdf.set_font("Helvetica", "B", 11)
+    pdf.set_xy(16, y + 1.4); pdf.cell(178, 6, _L("Composición (0-30 cm)"), 0, 1)
+    y += 12
+    pdf.set_text_color(*_TXT); pdf.set_font("Helvetica", "", 10)
+    comp = [("Arena", suelo.get("arena")), ("Limo", suelo.get("limo")),
+            ("Arcilla", suelo.get("arcilla")), ("Densidad aparente (g/cm3)", suelo.get("densidad"))]
+    for lab, v in comp:
+        pdf.set_x(18); pdf.cell(80, 6, _L(lab), 0, 0)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(40, 6, _L(f"{v}%" if (v is not None and lab != comp[3][0]) else (f"{v}" if v is not None else "s/d")), 0, 1)
+        pdf.set_font("Helvetica", "", 10)
+        y += 6
+
+    # interpretación
+    y += 4
+    pdf.set_fill_color(*_GREEN); _rrect(pdf, 12, y, 186, 8.5, 1.5, "F")
+    pdf.set_text_color(255, 255, 255); pdf.set_font("Helvetica", "B", 11)
+    pdf.set_xy(16, y + 1.4); pdf.cell(178, 6, _L("Interpretación"), 0, 1)
+    y += 12
+    pdf.set_text_color(*_TXT); pdf.set_font("Helvetica", "", 10)
+    for it in suelo.get("interpretacion", []):
+        pdf.set_fill_color(*_GREEN); pdf.rect(14, y + 1.6, 2, 2, "F")
+        pdf.set_xy(19, y); pdf.multi_cell(179, 5, _L(it), 0, "L")
+        y = pdf.get_y() + 3
+
+    # pie / caveat
+    import textwrap
+    txt = _L("Fuente: SoilGrids (ISRIC), modelo global de ~250 m. Valores estimados en el punto "
+             f"central del campo (lon {suelo.get('lon')}, lat {suelo.get('lat')}), promedio 0-30 cm. "
+             "Es una estimación de referencia, no reemplaza un análisis de suelo de laboratorio.")
+    lineas = textwrap.wrap(txt, 96); bh = len(lineas) * 4.6 + 7
+    if y < 250:
+        y = max(y, 250)
+    pdf.set_fill_color(*_WBG); pdf.set_draw_color(*_WBD)
+    _rrect(pdf, 12, y, 186, bh, 2.5, "DF")
+    pdf.set_text_color(*_WTX); pdf.set_font("Helvetica", "", 9)
+    pdf.set_xy(16, y + 3.5); pdf.multi_cell(178, 4.6, txt, 0, "L")
 
 
 def _seccion(pdf, titulo, items, y, color):
@@ -623,7 +692,7 @@ def main():
     print("============================================")
 
 
-def procesar_campo(campo, nombre, carpeta, args, tmp):
+def procesar_campo(campo, nombre, carpeta, args, tmp, suelo=None):
     minx, miny, maxx, maxy = campo.bounds
     km = args.buffer
     dlat = km / 111.0
@@ -651,7 +720,7 @@ def procesar_campo(campo, nombre, carpeta, args, tmp):
     pdf = os.path.join(carpeta, f"Informe_Escurrimiento_{nombre}.pdf")
     generar_mapa(acc, dem, field, bounds, nombre, datos, png, campo=campo)
     generar_kmz(acc, dem, field, bounds, campo, nombre, kmz)
-    generar_pdf(png, nombre, datos, pdf)
+    generar_pdf(png, nombre, datos, pdf, suelo=suelo)
     print(f"   ✔ {nombre}: ~{datos['ha_campo']} ha | desnivel {datos['desnivel']} m | "
           f"anegable ~{datos['ha_anegable']} ha | "
           + (", ".join(f"salida {s['rumbo']} ~{s['acc_ha']}ha" for s in datos['salidas']) or "sin cauces marcados"))

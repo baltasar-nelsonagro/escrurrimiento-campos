@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import streamlit as st
 
 import analisis_escurrimiento as motor
+import suelo as suelo_mod
 
 st.set_page_config(page_title="Escurrimiento de Campos · Nelson Agro",
                    page_icon="💧", layout="wide")
@@ -122,7 +123,7 @@ def pasos():
 # ----------------------------------------------------------------------------
 # Procesamiento (sin Streamlit, para testear aparte)
 # ----------------------------------------------------------------------------
-def procesar_kml(ruta, buffer_km, progreso=None):
+def procesar_kml(ruta, buffer_km, incluir_suelo=False, progreso=None):
     campos = motor.leer_contornos(ruta)
     n = len(campos)
     args = SimpleNamespace(buffer=float(buffer_km), dem=None, salida=None)
@@ -134,7 +135,12 @@ def procesar_kml(ruta, buffer_km, progreso=None):
             if progreso:
                 progreso(i / (n + 1), f"[{i}/{n}] Procesando {nombre} …")
             try:
-                r = motor.procesar_campo(c["poly"], nombre, salida_dir, args, tmp)
+                s = None
+                if incluir_suelo:
+                    if progreso:
+                        progreso(i / (n + 1), f"[{i}/{n}] {nombre}: consultando suelo …")
+                    s = suelo_mod.analizar_suelo(c["poly"])
+                r = motor.procesar_campo(c["poly"], nombre, salida_dir, args, tmp, suelo=s)
                 if not isinstance(r, dict):
                     raise RuntimeError("el motor no devolvió el resultado (actualizá analisis_escurrimiento.py)")
                 resultados.append(r)
@@ -159,7 +165,10 @@ def main():
         archivo = st.file_uploader("Contorno del campo (KML o KMZ)", type=["kml", "kmz"],
                                    label_visibility="collapsed")
         buffer_km = st.slider("Margen alrededor del campo (km)", 1, 6, 3)
-        correr = st.button("Analizar escurrimiento", type="primary", use_container_width=True)
+        incluir_suelo = st.checkbox("Incluir análisis de suelo", value=True,
+                                    help="Agrega una página al PDF con textura, pH, materia orgánica "
+                                         "y CIC (fuente SoilGrids). Suma unos segundos.")
+        correr = st.button("Analizar", type="primary", use_container_width=True)
 
     with col_out:
         if not correr:
@@ -183,7 +192,7 @@ def main():
             barra.progress(min(max(frac, 0.0), 1.0), text=txt)
         try:
             with st.spinner("Procesando (baja el mapa de elevación y calcula)…"):
-                resultados, fallidos = procesar_kml(tmpf.name, buffer_km, prog)
+                resultados, fallidos = procesar_kml(tmpf.name, buffer_km, incluir_suelo, prog)
         except Exception as e:
             st.error(f"No se pudo procesar el archivo: {e}")
             with st.expander("Ver detalle técnico del error"):
